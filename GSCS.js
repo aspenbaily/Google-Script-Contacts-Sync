@@ -86,7 +86,6 @@ PROBLEM REPORTING OR TROUBLESHOOTING
 If you have problems, please post it on GitHub and I will address it as soon as possible: https://github.com/fleapower/Google-Script-Contacts-Sync/issues.  If possible, include the log from the script's executions page (please note, your email address may be captured in the log - be sure to use hashtags vice your email address, e.g., #######@gmail.com).
 
 */
-
 var label1 = ss.getRange('A1');
 var label2 = ss.getRange('B1');
 var label3 = ss.getRange('C1');
@@ -127,7 +126,7 @@ var mySheet = ss.getSheetByName(currUser);
 
 var syncTokenFileName = currUser + "_PeopleSyncToken.txt";
 
-var pageSize = 2000;
+var pageSize = 200000;
 var masterPersonFields =
   "addresses,biographies,birthdays,calendarUrls,clientData,emailAddresses,events,externalIds,genders,imClients,interests,locales,locations,memberships,metadata,miscKeywords,names,nicknames,occupations,organizations,phoneNumbers,relations,sipAddresses,urls,userDefined";
 
@@ -141,7 +140,6 @@ function MasterInit() {
     ss.insertSheet(currUser);
   } catch {}
   RefreshSyncToken();
-    // removeDuplicates();
   deleteAllTriggers();
   var n = 0;
   var appendArray = new Array();
@@ -231,7 +229,7 @@ var contactArray = [name, phoneNumber, emailAddress, organization, streetAddress
             updateTime,
           ]);
         } else {
-          resourceNamesArray = resourceNamesArray.concat(["", 0]);
+          resourceNamesArray = resourceNamesArray.concat([0]);
         }
       }
 
@@ -248,7 +246,7 @@ var contactArray = [name, phoneNumber, emailAddress, organization, streetAddress
         }
       }
       
-      contactArray[13] = contactGroups.join(","); // 14th column is where memberships are; will need to be changed if script updated
+      contactArray[13] = contactGroups.join(); // 14th column is where memberships are; will need to be changed if script updated
 
       // complete apendArray
       appendArray = contactArray.concat(resourceNamesArray);
@@ -272,52 +270,32 @@ var contactArray = [name, phoneNumber, emailAddress, organization, streetAddress
   syncTokenFile.setContent(connections.nextSyncToken);
 
   createSyncContactsTrigger();
-
+  removeQuotationMarks();
   createDailyMaintenanceTrigger();
 
   showElapsedTime();
 }
 
-function ClientInit() {
-  // delete all triggers since ClientInit will create another
-  deleteAllTriggers();
 
-  RefreshSyncToken();
-
-  // create ClientInit to run again in seven minutes, one minute after extended runtime error would be thrown
-  ScriptApp.newTrigger("ClientInit")
-    .timeBased()
-    .after(7 * 60 * 1000)
-    .create();
-
-  // run SpreadsheetToContacts until initial sync is done
-
-  var completedStatus = SpreadsheetToContacts();
-  // if SpreadsheetToContacts fully completes, delete all triggers and create new trigger
-  if (completedStatus == "complete") {
-    deleteAllTriggers();
-    // refreshSyncToken to start syncing normally from this point
-    RefreshSyncToken();
-    // create user contacts sync queue
-    ss.insertSheet(currUser);
-
-    // create file for syncToken storage
-    DriveApp.createFile(syncTokenFileName, "");
-
-    // create syncContacts trigger
-    createSyncContactsTrigger();
-
-    MailApp.sendEmail({
-      to: statusEmail,
-      subject: "GS Contacts Sync is Synchronizing!",
-      htmlBody:
-        "The initial contact sync for " +
-        currUser +
-        " is complete!  Contacts may be added, modified, or deleted as usual.",
-    });
+function removeQuotationMarks() {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var data = sheet.getDataRange().getValues();
+  var newData = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = [];
+    for (var j = 0; j < data[i].length; j++) {
+      var cellValue = data[i][j];
+      if (typeof cellValue === 'string') {
+        row.push(cellValue.replace(/"/g, ''));
+      } else {
+        row.push(cellValue);
+      }
+    }
+    newData.push(row);
   }
+  sheet.getDataRange().clearContent();
+  sheet.getRange(1, 1, newData.length, newData[0].length).setValues(newData);
 }
-
 function deleteAllTriggers() {
   Logger.log("  deleteAllTriggers");
   var triggers = ScriptApp.getProjectTriggers();
@@ -341,6 +319,7 @@ function createDailyMaintenanceTrigger() {
     .atHour(3)
     .everyDays(1) // maintenance will run every 24 hours
     .create();
+    
 }
 
 function syncContacts() {
@@ -352,7 +331,7 @@ function syncContacts() {
   UpdatesMerge();
   showElapsedTime();
   SpreadsheetToContacts();
-
+  removeQuotationMarks();
   showElapsedTime();
   // it appears refreshing the sync token too quickly after updates does not capture the most recent updates
   // this does leave open the possibility that contacts which are updated during this interval or while the script is running will not be synchronized
@@ -363,12 +342,13 @@ function syncContacts() {
 
 function RemoveIDandStringify(contactArray) {
   // remove ID tags and stringify
+  
   for (var i = 0; i < contactArray.length; i++) {
     if (contactArray[i]) {
       removeID(contactArray[i]);
     }
     if (contactArray[i]) {
-      contactArray[i] = JSON.stringify(contactArray[i]).replace("[", "").replace("\"", "").replace("\",", "").replace("]", "").replace(']', '').replace({});
+      contactArray[i] = JSON.stringify(contactArray[i]);
     } else {
       contactArray[i] = {};
     }
@@ -382,11 +362,7 @@ function removeID(obj) {
     else if (typeof obj[prop] === "object") removeID(obj[prop]);
   }
 }
-// function removeDuplicates() {
-//   var spread = SpreadsheetApp.getActiveSheet();
-//   var range = spread.getRange(1, spread.getLastRow()); // Column A and B
-//   range.removeDuplicates(range);
-// }
+
 function SpreadsheetToContacts() {
   Logger.log("SpreadsheetToContacts");
 
@@ -870,15 +846,10 @@ function dailyMaintenance() {
     }
   }
   Logger.log("     Rows deleted: " + rowsDeleted);
-
-  // recreate triggers for master account
   createSyncContactsTrigger();
-  // createDailyMaintenanceTrigger();
-
-  // restore users' permissions for spreadsheet
-
+  createDailyMaintenanceTrigger();
   for (var i = 0; i < syncAccounts.length; i++) {
     if (syncAccounts[i] != currUser) {
       ss.addEditor(syncAccounts[i]);
     }
-  }
+    }}
